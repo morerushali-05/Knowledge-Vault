@@ -1,93 +1,133 @@
 # Quantitative Affinity Data at Scale: Addressing the Data Bottleneck in AI-Enabled Protein Design
 
-**Speaker:** Natasha Seelam (A-Alpha Bio)
+**Speaker:** Natasha Seelam (A-Alpha Bio)  
 **Venue:** Boston Protein Design and Modeling Club
 
 ## Acknowledgements
 
-This repository contains technical notes, pipeline breakdowns, and architectural benchmarks summarized from a presentation delivered at the **Boston Protein Design and Modeling Club**. 
-The entire work featured in this repository is executed and validated by speaker **Natasha Seelam** and her team at **A-Alpha Bio**.
-This project serves as a structured technical reference of their presentation for the computational protein biology community.
+This repository contains technical notes, pipeline summaries, and architectural benchmarks distilled from a presentation delivered at the **Boston Protein Design and Modeling Club**. The work summarized here was executed and validated by speaker **Natasha Seelam** and colleagues at **A-Alpha Bio**. The goal is to provide a structured technical reference for the computational protein biology community.
 
 ## Background
 
-    Antibody design is bottlenecked by **data, not architecture**: the CDR design space is ~10³⁰ sequences, but the public structural/affinity corpus is small (~10K antibody x antigen structures in SAbDab-2 database, ~1K affinity labels across AB-Bind/SKEMPI/ANTIPASTI).
-    Structure-prediction confidence (ipTM, ipSAE, pLDDT, Boltz-2 confidence) **does not correlate with binding** - the model might have nearly identical confidence scores for a real 17 nM binder and a >10 µM non-binder. 
-    A-Alpha Bio's fix: uses their high throughput assay: **AlphaSeq**, to generate paired in silico/in vitro labels at scale, across their three workstreams.
+Antibody design is constrained less by model architecture than by the availability of high-quality, quantitative binding data. The complementary determining region (CDR) sequence space is estimated at roughly 10^30 possible variants, yet the public corpus of antibody-antigen structures and affinity measurements remains limited—on the order of approximately 10,000 resolved complexes. This mismatch makes it difficult for models to learn the relationship between sequence, structure, and function, especially for rare or de novo binders.
 
+A second challenge is that structure-prediction confidence metrics—including ipTM, ipSAE, pLDDT, and Boltz-2 confidence—do not reliably predict binding. A model can assign similar confidence values to a true 17 nM binder and a non-binding decoy, suggesting that structural plausibility alone is not sufficient to identify productive protein-protein interactions.
+
+A-Alpha Bio addresses this bottleneck through **AlphaSeq**, a high-throughput yeast-display platform that pairs large-scale in silico design with quantitative in vitro affinity measurements. In practice, the team generates paired sequence-to-affinity labels at scale across several design workstreams, enabling model training on the signal that matters most: measurable binding and specificity.
+
+------------------------------------------------------------------------
 
 ## AlphaSeq: Yeast-display library
 
-    Separate antigen and antibody libraries are generated; if specific binding happens, it drives cellular fusion, which is further quantified via NGS. This provides a parallel, quantitative K_D affinity readout
+AlphaSeq uses separate antigen and antibody libraries. When a specific antibody-antigen interaction occurs, it drives cellular fusion and can be quantified by next-generation sequencing (NGS), providing parallel readouts of binding and affinity across many variants. The resulting data are not just binary binders/non-binders; they provide quantitative K_D measurements, enabling model training on the full spectrum of affinity and specificity.
+
+This design is particularly attractive because it scales beyond the small set of experimentally solved complexes. Instead of relying on a few curated structures, the system creates a large and continuously growing training set grounded in direct binding measurements.
 
 ------------------------------------------------------------------------
 
 ## 1. Pseudo-structures (SEPIA → ABACUS)
 
-**Problem** 
-    The PDB only contains the true binding complexes but no negative examples, which is the reason why structure models never learn to spot "plausible but non-binding" interactions, meaning they cannot screen for them.
-    ipSAE vs. AlphaSeq affinity confusion matrix of generated designs reveals a True Positive rate of 17.2%, a False Positive rate of 19.6%, False Negative of 3.8%, True Negative of 59.4%, which indicates ~1 in 5 "confident" predictions is a false positive (hard negative).
+### Problem
 
-**Pseudo-structure**: in silico structure prediction along with AlphaSeq validation to have every candidate real K_D value.
+Public structure databases contain mostly true binding complexes, but very few negative examples. This means that structure-based models rarely learn to distinguish between “plausible-looking but non-binding” interactions and genuinely productive interfaces. In other words, the model sees what good complexes look like but not what near-miss designs look like.
 
-**SEPIA (Synthetic Epitope Atlas)**: 
-    Instead of matching one antibody with one natural epitope, multiple synthetic epitopes that mimic the natural epitope and are recognized by that single antibody were created to massively expand structural and interface diversity per antibody.
+This limitation is visible in model behavior: a pseudo-structure-based pipeline can generate many designs that appear structurally convincing, yet only a minority are true binders. Reported confusion-matrix values from ipSAE versus AlphaSeq affinity analysis show a true positive rate of 17.2%, a false positive rate of 19.6%, a false negative rate of 3.8%, and a true negative rate of 59.4%. These numbers highlight the importance of integrating experimental affinity labels into model training.
 
-- pipeline: 
-    VHH Structure -> RFDiffusion (generation) -> ProteinMPNN (inverse fold) -> Sequence naturalness filter -> Boltz2 (refolding) -> TM-score & confidence filter
+### Pseudo-structure generation
 
-- yield
-    928 high-quality hits were obtained.
-    On-target hits (~4% overall hit rate) validated with a KD < 1 µM and no significant off-target binding. 
-    Notably, 71% of the tested VHHs (34 out of 48) yielded at least one high-quality hit, and all validated hits were multi-specific.
+A pseudo-structure workflow aims to combine in silico folding with empirical validation. For every candidate generated by the model, the team obtains a real K_D value, allowing the system to learn from both positive and negative examples.
 
-**Validation: SEPIA is real signal and not noise**
-    To ensure the synthetic data provides genuine biological signal rather than artifacts or noise.
-    - An antibody-blind structure language model (NTX) was used to prevent data leakage. NTX was pre-trained only on monomers from the AlphaFold Database (AFDB) and explicitly excluded all structural complexes from the PDB and SAbDab.
-    - Breaking Data Plateaus: Adding SEPIA data significantly enhanced learning efficiency, breaking through the performance ceilings seen when training decoy-detection classifiers on public data alone.
-    - The classifier ABACUS scores de novo VHH designs, serving as the primary deployment model to rank candidate antibodies in active, live design campaigns.
-    - Fixing High-Confidence Inversion: Standard metrics like ipTM and ipSAE ironically invert and decline at the highest scores, meaning the most "confident" structural predictions are frequently false positives. A classifier trained on NTX + SAbDab-nano + SEPIA completely eliminates this inversion, heavily outperforming raw structural metrics and real-data-only models.
+### SEPIA (Synthetic Epitope Atlas)
+
+SEPIA expands the number of valid antigenic contexts beyond the handful of naturally observed epitopes. Rather than matching a single antibody to one natural epitope, the method creates multiple synthetic epitopes that mimic the same biological recognition mode. This dramatically enlarges the dataset available for training.
+
+The SEPIA generation pipeline is:
+- VHH structure
+- RFdiffusion for design generation
+- ProteinMPNN for inverse folding
+- sequence naturalness filtering
+- Boltz-2 refolding
+- TM-score and confidence filtering
+
+### Yield
+
+This workflow generated 928 high-quality hits. Roughly 4% of all designs reached the on-target threshold, defined as K_D < 1 µM with no major off-target binding. The signal was not limited to a few exceptional antibodies: 71% of the tested VHHs (34 out of 48) produced at least one high-quality hit, and all validated hits were multi-specific.
+
+### Validation: SEPIA is real signal, not noise
+
+To ensure the synthetic data provides genuine biological signal rather than artifacts or noise, an antibody-blind structure language model (NTX) was used. NTX was pretrained only on monomers from the AlphaFold Database and explicitly excluded all structural information from the target antibody set.
+
+This matters because it demonstrates that the gains are not simply due to memorization or leakage. Instead, adding SEPIA data significantly improved learning efficiency and broke through the performance ceiling seen when training decoy-detection classifiers on public data alone.
+
+The resulting classifier, **ABACUS**, scores de novo VHH designs and acts as the primary model used to rank candidate sequences in active design campaigns. It helps address a central failure mode in conventional structure-based scoring: standard metrics such as ipTM and ipSAE can actually decline at the highest confidence levels, meaning the most “confident” structural predictions are not always the best binders.
 
 ------------------------------------------------------------------------
 
 ## 2. Mutational affinity landscapes (AlphaBind)
 
-**Problem:** 
-The combinatorial Explosion: We cannot find a plausible antibody by simply guessing and testing every possible mutant combination in a lab. While existing AI models (such as ESM-C) are completely blind when it comes to predicting how tightly an antibody will bind to a target, current models score weakly on the rigid structural backbone (framework) of antibody and become ineffective when evaluating flexible loops that form bonds with the target. So, it is more of random guesses.
+### Problem
 
-**Massive Labeled Data**: The data shortage for antibody AI models was solved by open-sourcing a massive dataset called open-alphaseq. It contains 2 million data points tracking how mutations affect binding and accounts for more than half (>60%) of all public nanobody data and >99% of all public single-chain antibody (scFv) data.
+A naive search over all possible antibody mutations is impossible. Even if one could generate millions of candidate sequences in silico, only a tiny fraction could be tested experimentally. The challenge is therefore not just generating candidates, but identifying which variants are likely to be both viable and functionally useful.
 
-**Filtering Data: AlphaBind**: In silico, it is possible to generate 10 million theoretical antibody designs, but testing those designs in a lab is incredibly difficult. AlphaBind AI screens them and provides the top ~10 highest-confidence candidate antibodies, driven by millions of pre-trained data points.
+This is where large-scale affinity data becomes essential. Existing models such as ESM-C are largely blind to the subtle effects of point mutations on binding, specificity, and stability, especially when the search space is large and highly non-linear.
 
-**Validating high-confidence candidates**: In the wet lab, those candidates are screened through BLI affinity, CHO expression, ELISA polyreactivity, aSEC purity, and DSF stability.
+### Massive labeled data
 
-**Key results:**
-- The AlphaSeq & AlphaBind pipeline successfully retains its predictive accuracy for identifying functional variants.
-- Current open-source inverse-folding models are limited in their ability to accurately separate overall protein quality (including stability) from protein-protein interactions (including affinity scores).
-- The massive data used to train AlphaBind helps track single de novo binders which might has significantly stronger sequences accessible through just 1–2 downstream mutations. This feature is highly useful to deploy in silico to affinity-mature weak initial structures.
+The data bottleneck was addressed by open-sourcing the AlphaSeq dataset, which contains more than 2 million data points describing how mutations affect binding behavior. This enables models to learn mutational effects directly from quantitative measurements rather than from structural priors alone.
+
+### Filtering data: AlphaBind
+
+AlphaBind uses the large labeled dataset to identify promising mutations from a much larger theoretical design space. In silico, the team can generate roughly 10 million theoretical variants, but only a limited fraction can be experimentally validated. AlphaBind acts as a screening layer to prioritize candidates most likely to retain function.
+
+### Validating high-confidence candidates
+
+The highest-confidence candidates undergo wet-lab validation using:
+- BLI affinity measurements
+- CHO expression assays
+- ELISA polyreactivity screening
+- aSEC purity checks
+- DSF stability assays
+
+This multi-readout workflow is important because overall protein quality, expression, and stability are not the same as protein-protein affinity. A design may appear promising by sequence or structure but still fail in the lab because it is unstable, poorly expressed, or overly promiscuous.
+
+### Key results
+
+- The AlphaSeq and AlphaBind pipeline retains predictive accuracy for identifying functional variants.
+- Current open-source inverse-folding models are limited in their ability to distinguish protein quality—including stability—from protein-protein interaction quality—including affinity and specificity.
+- The massive data used to train AlphaBind helps recover single de novo binders that may become significantly stronger through just one or two downstream mutations. This feature is highly valuable in real design campaigns, where small sequence edits can determine whether a weak hit becomes a viable therapeutic lead.
 
 ------------------------------------------------------------------------
 
 ## 3. Benchmarking (defining SOTA)
 
-**Tiered Difficulty Framework**
-To standardize evaluation, the computational design targets were categorized into 3 tiers as follows:
-1. Tier1:  Known antibody bound complex structure exists
-2. Tier2: Known antigen structure exists, but no bound antibody structure is available
-3. Tier3: Unbound target
+### Tiered difficulty framework
 
-**Benchmark evaluation**:  The 3 best AI antibody design models were tested against 30 different targets, which revealed that no single model is successful at designing a working antibody for all 30 targets. Additionally, off-target or promiscuous binding remains a significant issue. This suggests that each model has its own unique strengths and weaknesses.
+To standardize evaluation, the computational design targets were categorized into three tiers:
+1. Tier 1: a known antibody-bound complex structure exists
+2. Tier 2: the antigen structure is known, but no bound antibody structure is available
+3. Tier 3: the target is unbound
 
-**Broader validation effort is in progress**
+This framework enables more meaningful evaluation across targets that vary in biological and structural complexity.
+
+### Benchmark evaluation
+
+The three best AI antibody design models were tested across 30 targets. The result was clear: no single model is successful at designing a working antibody for all 30 targets. This underscores the importance of benchmark design and target-specific strategy selection.
+
+This is a reminder that model performance is highly context-dependent. A model that excels on one class of targets may fail on another, especially when the antigen structure is missing or the target is difficult to bind.
+
+### Broader validation effort is in progress
+
+The work described here is part of a larger effort to establish robust benchmarks for AI-driven antibody design. These evaluations are still evolving, but they signal a shift from isolated model demonstrations toward standardized, clinically relevant assessment pipelines.
 
 ------------------------------------------------------------------------
 
-
 ## References
+
 - SEPIA preprint: https://www.biorxiv.org/content/10.64898/2026.04.17.719295v2.full.pdf
 - Open AlphaSeq dataset: https://huggingface.co/datasets/aalphabio/open-alphaseq
 - NaturalAntibody DB: https://naturalantibody.com/agab/
 - Younger et al., *PNAS* (2017); Engelhart et al., *Antibody Therapeutics* (2022) — AlphaSeq methodology
 
 ---
-*Notes compiled from a live seminar (A-Alpha Bio slide deck, "Boston Protein Design and Modeling Club").*
+
+*Notes compiled from a live seminar and accompanying slide deck presented by A-Alpha Bio at the Boston Protein Design and Modeling Club.*
