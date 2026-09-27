@@ -11,14 +11,14 @@ This project serves as a structured technical reference of their presentation fo
 
 ## Background
 
-    Antibody design is bottlenecked by **data, not architecture**: the CDR design space is ~10³⁰ sequences, but the public structural/affinity corpus is small (~10K antibody x antigen structures in SAbDab-2 database, ~1K affinity labels across AB-Bind/SKEMPI/ANTIPASTI).
-    Structure-prediction confidence (ipTM, ipSAE, pLDDT, Boltz-2 confidence) **does not correlate with binding** - the model might have nearly identical confidence scores for a real 17 nM binder and a >10 µM non-binder. 
-    A-Alpha Bio's fix: uses their high throughput assay: **AlphaSeq**, to generate paired in silico/in vitro labels at scale, across their three workstreams.
+Antibody design is bottlenecked by **data, not architecture**: the CDR design space is ~10³⁰ sequences, but the public structural/affinity corpus is small (~10K antibody x antigen structures in SAbDab-2 database, ~1K affinity labels across AB-Bind/SKEMPI/ANTIPASTI).
+Structure-prediction confidence (ipTM, ipSAE, pLDDT, Boltz-2 confidence) **does not correlate with binding** - the model might have nearly identical confidence scores for a real 17 nM binder and a >10 µM non-binder. 
+A-Alpha Bio's fix: uses their high throughput assay: **AlphaSeq**, to generate paired in silico/in vitro labels at scale, across their three workstreams.
 
 
 ## AlphaSeq: Yeast-display library
 
-    Separate antigen and antibody libraries are generated; if specific binding happens, it drives cellular fusion, which is further quantified via NGS. This provides a parallel, quantitative K_D affinity readout
+Separate antigen and antibody libraries are generated; if specific binding happens, it drives cellular fusion, which is further quantified via NGS. This provides a parallel, quantitative K_D affinity readout
 
 ------------------------------------------------------------------------
 
