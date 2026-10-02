@@ -90,4 +90,4 @@ To standardize evaluation, the computational design targets were categorized int
 - Younger et al., *PNAS* (2017); Engelhart et al., *Antibody Therapeutics* (2022) — AlphaSeq methodology
 
 ---
-*Notes compiled from a live seminar (A-Alpha Bio slide deck, "Boston Protein Design and Modeling Club").*
+*Notes compiled from a live seminar (A-Alpha Bio, "Boston Protein Design and Modeling Club").*
